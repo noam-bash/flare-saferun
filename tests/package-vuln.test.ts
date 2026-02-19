@@ -17,13 +17,13 @@ const DEFAULT_POLICY: ActionPolicy = {
   critical: "ask",
 };
 
-function buildPipeline(osvTimeout = 1500): Analyzer[] {
+function buildPipeline(osvTimeout = 1500, packageAllowlist: string[] = []): Analyzer[] {
   return [
     destructiveAnalyzer,
     permissionsAnalyzer,
     createSensitivePathAnalyzer([]),
     createNetworkAnalyzer([]),
-    createPackageVulnAnalyzer(osvTimeout),
+    createPackageVulnAnalyzer(osvTimeout, packageAllowlist),
   ];
 }
 
@@ -235,6 +235,47 @@ describe("integration: action policy customization", () => {
     const result = await assessCommand("npm install strict-pkg@1.0.0", "/tmp", strictPolicy);
     expect(result.risk_level).toBe("low");
     expect(result.action).toBe("ask"); // strict policy overrides default "run"
+  });
+});
+
+describe("integration: packageAllowlist", () => {
+  it("allowlisted package skips OSV lookup entirely", async () => {
+    const spy = mockOsv({ vulns: [{ id: "CVE-2024-9999", severity: [{ type: "CVSS_V3", score: "9.8" }] }] });
+    const parsed = parseCommand("npm install lodash@4.17.20");
+    const analyzers = buildPipeline(1500, ["lodash@4.17.20"]);
+    const results = await Promise.all(analyzers.map(a => a.analyze(parsed, "/tmp")));
+    const result = scoreRisk(results, DEFAULT_POLICY);
+    expect(spy).not.toHaveBeenCalled();
+    expect(result.risk_level).toBe("none");
+  });
+
+  it("allowlisted package name (without version) skips all versions", async () => {
+    const spy = mockOsv({ vulns: [{ id: "CVE-2024-9999", severity: [{ type: "CVSS_V3", score: "9.8" }] }] });
+    const parsed = parseCommand("npm install lodash@4.17.4");
+    const analyzers = buildPipeline(1500, ["lodash"]);
+    const results = await Promise.all(analyzers.map(a => a.analyze(parsed, "/tmp")));
+    const result = scoreRisk(results, DEFAULT_POLICY);
+    expect(spy).not.toHaveBeenCalled();
+    expect(result.risk_level).toBe("none");
+  });
+
+  it("allowlist is case-insensitive", async () => {
+    const spy = mockOsv({ vulns: [{ id: "CVE-2024-9999", severity: [{ type: "CVSS_V3", score: "9.8" }] }] });
+    const parsed = parseCommand("npm install Lodash@4.17.20");
+    const analyzers = buildPipeline(1500, ["lodash@4.17.20"]);
+    const results = await Promise.all(analyzers.map(a => a.analyze(parsed, "/tmp")));
+    const result = scoreRisk(results, DEFAULT_POLICY);
+    expect(spy).not.toHaveBeenCalled();
+    expect(result.risk_level).toBe("none");
+  });
+
+  it("non-allowlisted package still gets checked", async () => {
+    mockOsv({ vulns: [{ id: "CVE-2024-1234", severity: [{ type: "CVSS_V3", score: "9.8" }] }] });
+    const parsed = parseCommand("npm install express@4.16.0");
+    const analyzers = buildPipeline(1500, ["lodash@4.17.20"]);
+    const results = await Promise.all(analyzers.map(a => a.analyze(parsed, "/tmp")));
+    const result = scoreRisk(results, DEFAULT_POLICY);
+    expect(result.risk_level).toBe("critical");
   });
 });
 

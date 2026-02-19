@@ -1,6 +1,7 @@
 import type { Analyzer, AnalyzerResult, Finding, ParsedCommand } from "../types.js";
 
 const NETWORK_VERBS = new Set(["curl", "wget", "nc", "netcat", "ncat", "ssh", "scp", "rsync", "ftp", "sftp"]);
+const DNS_VERBS = new Set(["nslookup", "dig", "host", "drill"]);
 
 const SENSITIVE_DATA_SOURCES = [
   /\/etc\/passwd/,
@@ -40,6 +41,26 @@ export function createNetworkAnalyzer(extraSafeHosts: string[] = []): Analyzer {
       for (let i = 0; i < parsed.length; i++) {
         const cmd = parsed[i];
 
+        // --- DNS exfiltration: nslookup/dig/host with subshell in args ---
+        if (DNS_VERBS.has(cmd.verb)) {
+          const rawArgs = cmd.rawSegment;
+          const hasSubshell = rawArgs.includes("$(") || rawArgs.includes("`");
+          if (hasSubshell) {
+            findings.push({
+              category: "network",
+              severity: "critical",
+              description: `\`${cmd.verb}\` with embedded subshell — possible DNS exfiltration`,
+            });
+          } else {
+            findings.push({
+              category: "network",
+              severity: "low",
+              description: `\`${cmd.verb}\` — DNS lookup tool`,
+            });
+          }
+          continue;
+        }
+
         if (!NETWORK_VERBS.has(cmd.verb)) continue;
 
         // Check if sensitive data is being piped TO this network command
@@ -71,6 +92,21 @@ export function createNetworkAnalyzer(extraSafeHosts: string[] = []): Analyzer {
         const host = url ? extractHost(url) : null;
         const isSafeHost = host ? allSafeHosts.has(host) : false;
         const isHttp = url?.startsWith("http://");
+
+        // Check for credential leakage in headers
+        if (cmd.verb === "curl" || cmd.verb === "wget") {
+          const headerValue = findArgValue(cmd.args, ["-H", "--header"]);
+          if (headerValue && !isSafeHost) {
+            const leaksCredentials = /\b(Authorization|Bearer|Token|Cookie|X-Api-Key|X-Auth-Token)\b/i.test(headerValue);
+            if (leaksCredentials) {
+              findings.push({
+                category: "network",
+                severity: "high",
+                description: `\`${cmd.verb}\` sending credentials in header to \`${host ?? "unknown host"}\``,
+              });
+            }
+          }
+        }
 
         if (uploadsData && !isSafeHost) {
           const dataArg = findArgValue(cmd.args, ["-d", "--data", "--data-binary", "-T", "--upload-file"]);

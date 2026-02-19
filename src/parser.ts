@@ -195,27 +195,104 @@ function removeRedirects(segment: string): string {
 /**
  * Extract contents of $(...) and `...` subshells and append them
  * as semicolon-separated segments so they get analyzed.
+ * Also extracts process substitutions <(...) and >(...).
  */
 function expandSubshells(command: string): string {
   const subshells: string[] = [];
 
-  // Match $(...) — handles one level of nesting
-  const dollarParen = /\$\(([^)]+)\)/g;
-  let match: RegExpExecArray | null;
-  while ((match = dollarParen.exec(command)) !== null) {
-    subshells.push(match[1]);
-  }
+  // Extract $(...) with balanced parentheses (handles nesting)
+  extractBalancedSubshells(command, subshells);
 
-  // Match `...` backticks
+  // Extract `...` backticks
+  let match: RegExpExecArray | null;
   const backtick = /`([^`]+)`/g;
   while ((match = backtick.exec(command)) !== null) {
     subshells.push(match[1]);
   }
 
+  // Extract process substitutions <(...) and >(...)
+  extractProcessSubstitutions(command, subshells);
+
+  // Extract heredoc bodies fed to interpreters
+  extractHeredocBodies(command, subshells);
+
   if (subshells.length === 0) return command;
 
   // Append subshell contents as additional segments separated by ;
   return command + " ; " + subshells.join(" ; ");
+}
+
+/**
+ * Extract $(...) subshells using balanced parenthesis counting.
+ * Recurses into nested subshells like $(echo $(whoami)).
+ */
+function extractBalancedSubshells(command: string, out: string[]): void {
+  let i = 0;
+  while (i < command.length) {
+    if (command[i] === "$" && command[i + 1] === "(") {
+      const start = i + 2;
+      let depth = 1;
+      let j = start;
+      while (j < command.length && depth > 0) {
+        if (command[j] === "(") depth++;
+        else if (command[j] === ")") depth--;
+        if (depth > 0) j++;
+      }
+      if (depth === 0) {
+        const inner = command.slice(start, j);
+        out.push(inner);
+        // Recurse to extract nested subshells
+        extractBalancedSubshells(inner, out);
+        i = j + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+}
+
+/**
+ * Extract process substitutions <(...) and >(...).
+ */
+function extractProcessSubstitutions(command: string, out: string[]): void {
+  let i = 0;
+  while (i < command.length) {
+    if ((command[i] === "<" || command[i] === ">") && command[i + 1] === "(") {
+      const start = i + 2;
+      let depth = 1;
+      let j = start;
+      while (j < command.length && depth > 0) {
+        if (command[j] === "(") depth++;
+        else if (command[j] === ")") depth--;
+        if (depth > 0) j++;
+      }
+      if (depth === 0) {
+        out.push(command.slice(start, j));
+        i = j + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+}
+
+const INTERPRETER_VERBS = new Set(["bash", "sh", "zsh", "dash", "python", "python3", "node", "ruby", "perl"]);
+
+/**
+ * Detect heredocs fed to interpreter verbs (e.g. bash <<EOF ... EOF).
+ * Extracts the heredoc body so its contents can be analyzed.
+ */
+function extractHeredocBodies(command: string, out: string[]): void {
+  // Match: interpreter <<[-]?['"]?DELIM['"]? ... DELIM
+  const heredocStart = /\b(\w+)\s+<<-?\s*['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\s*\2\b/g;
+  let match: RegExpExecArray | null;
+  while ((match = heredocStart.exec(command)) !== null) {
+    const verb = match[1];
+    const body = match[3];
+    if (INTERPRETER_VERBS.has(verb) && body.trim()) {
+      out.push(body.trim());
+    }
+  }
 }
 
 /**
