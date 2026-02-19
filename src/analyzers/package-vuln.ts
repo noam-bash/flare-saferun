@@ -1,12 +1,12 @@
 import type { Analyzer, AnalyzerResult, Finding, ParsedCommand } from "../types.js";
 
-interface OsvVulnerability {
+export interface OsvVulnerability {
   id: string;
   summary?: string;
   severity?: Array<{ type: string; score: string }>;
 }
 
-interface PackageInfo {
+export interface PackageInfo {
   name: string;
   version: string | null;
   ecosystem: string;
@@ -73,12 +73,12 @@ const ECOSYSTEM_MAP: Record<string, { verbs: string[]; ecosystem: string; parseA
 const OSV_CACHE_MAX = 500;
 const osvCache = new Map<string, OsvVulnerability[]>();
 
-interface OsvResult {
+export interface OsvResult {
   vulns: OsvVulnerability[];
   error?: string;
 }
 
-async function queryOsv(pkg: PackageInfo, timeout: number): Promise<OsvResult> {
+export async function queryOsv(pkg: PackageInfo, timeout: number): Promise<OsvResult> {
   if (!pkg.version) return { vulns: [] }; // Can't query without a version
 
   const cacheKey = `${pkg.ecosystem}:${pkg.name}@${pkg.version}`;
@@ -119,7 +119,7 @@ async function queryOsv(pkg: PackageInfo, timeout: number): Promise<OsvResult> {
   }
 }
 
-function getCvssScore(vuln: OsvVulnerability): number | null {
+export function getCvssScore(vuln: OsvVulnerability): number | null {
   if (!vuln.severity) return null;
   const cvss = vuln.severity.find(s => s.type === "CVSS_V3" || s.type === "CVSS_V2");
   if (!cvss) return null;
@@ -171,7 +171,7 @@ function approximateScoreFromVector(vector: string): number {
   return Math.min(score, 10);
 }
 
-function cvssToSeverity(score: number | null): Finding["severity"] {
+export function cvssToSeverity(score: number | null): Finding["severity"] {
   if (score === null) return "medium"; // Unknown CVSS, assume medium
   if (score >= 9.0) return "critical";
   if (score >= 7.0) return "high";

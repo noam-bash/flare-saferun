@@ -2,7 +2,7 @@ import { appendFile, mkdir } from "fs/promises";
 import { dirname } from "path";
 import type { ParsedCommand, RiskAssessment } from "./types.js";
 
-interface LogEntry {
+interface LogEntryJson {
   timestamp: string;
   command: string;
   cwd: string;
@@ -11,18 +11,43 @@ interface LogEntry {
   parsed_commands?: Array<{ verb: string; args: string[]; operator: string | null }>;
 }
 
+/**
+ * Abstraction for log writing backends.
+ */
+export interface LogWriter {
+  write(
+    command: string,
+    cwd: string,
+    assessment: RiskAssessment,
+    durationMs: number,
+    parsed?: ParsedCommand[],
+  ): void;
+}
+
+let activeWriter: LogWriter | null = null;
+
+// JSONL writer state
 let logFilePath: string | false = false;
 let dirEnsured = false;
 let writeChain: Promise<void> = Promise.resolve();
 
 /**
- * Initialize the logger with the configured log file path.
+ * Initialize the logger with the configured log file path (JSONL backend).
  * Pass `false` to disable logging entirely.
  */
 export function initLogger(path: string | false): void {
   logFilePath = path;
   dirEnsured = false;
   writeChain = Promise.resolve();
+  activeWriter = null; // Use built-in JSONL writer
+}
+
+/**
+ * Initialize the logger with a custom LogWriter backend (e.g. SQLite).
+ */
+export function initLoggerWithWriter(writer: LogWriter): void {
+  activeWriter = writer;
+  logFilePath = false; // Disable JSONL
 }
 
 /**
@@ -37,9 +62,20 @@ export function writeLogEntry(
   durationMs: number,
   parsed?: ParsedCommand[],
 ): void {
+  // Custom writer (e.g. SQLite)
+  if (activeWriter) {
+    try {
+      activeWriter.write(command, cwd, assessment, durationMs, parsed);
+    } catch {
+      // Silently swallow
+    }
+    return;
+  }
+
+  // JSONL writer
   if (logFilePath === false) return;
 
-  const entry: LogEntry = {
+  const entry: LogEntryJson = {
     timestamp: new Date().toISOString(),
     command,
     cwd,

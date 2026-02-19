@@ -18,11 +18,18 @@ export interface ParsedCommand {
   position: number;
 }
 
+export interface SourceLocation {
+  file: string;
+  line?: number;
+  context?: string;
+}
+
 export interface Finding {
   category: string;
   severity: RiskLevel;
   description: string;
   analyzer?: string;
+  source?: SourceLocation;
 }
 
 export interface AnalyzerResult {
@@ -52,4 +59,5 @@ export interface Config {
   safeHosts: string[];
   commandAllowlist: string[];
   logFile: string | false;
+  logBackend: "jsonl" | "sqlite";
 }

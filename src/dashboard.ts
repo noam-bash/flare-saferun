@@ -1,5 +1,5 @@
 import { createServer } from "http";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import { homedir } from "os";
 import { createJsonlStore, type LogStore, type LogQuery } from "./log-store.js";
@@ -66,8 +66,23 @@ function startServer(store: LogStore, port: number) {
 }
 
 const logPath = getLogPath();
-const store = createJsonlStore(logPath);
 const PORT = parseInt(process.env.PORT ?? "6040", 10);
+
+// Auto-detect backend: prefer SQLite .db if it exists, else JSONL
+let store: LogStore;
+const dbPath = logPath.replace(/\.jsonl$/, ".db");
+if (existsSync(dbPath)) {
+  try {
+    const { createSqliteStore } = await import("./log-store-sqlite.js");
+    store = createSqliteStore(dbPath);
+    console.log("Using SQLite backend");
+  } catch {
+    store = createJsonlStore(logPath);
+  }
+} else {
+  store = createJsonlStore(logPath);
+}
+
 startServer(store, PORT);
 
 // ---------------------------------------------------------------------------
