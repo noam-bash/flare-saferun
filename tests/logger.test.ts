@@ -3,7 +3,7 @@ import { initLogger, writeLogEntry } from "../src/logger.js";
 import { readFile, rm, access } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import type { RiskAssessment } from "../src/types.js";
+import type { ParsedCommand, RiskAssessment } from "../src/types.js";
 
 const TEST_DIR = join(tmpdir(), `flare-log-test-${process.pid}`);
 
@@ -118,5 +118,58 @@ describe("logger", () => {
     const entry = JSON.parse(content.trim());
     expect(entry.assessment).toEqual(assessment);
     expect(entry.duration_ms).toBe(42);
+  });
+
+  it("includes parsed_commands when provided", async () => {
+    const logFile = testLogFile("parsed");
+    initLogger(logFile);
+    const parsed: ParsedCommand[] = [
+      { verb: "cat", args: ["/etc/passwd"], operator: "|", redirects: [], rawSegment: "cat /etc/passwd", position: 0 },
+      { verb: "grep", args: ["root"], operator: null, redirects: [], rawSegment: "grep root", position: 1 },
+    ];
+    writeLogEntry("cat /etc/passwd | grep root", "/tmp", SAMPLE_ASSESSMENT, 3, parsed);
+    await settle();
+
+    const content = await readFile(logFile, "utf-8");
+    const entry = JSON.parse(content.trim());
+    expect(entry.parsed_commands).toHaveLength(2);
+    expect(entry.parsed_commands[0].verb).toBe("cat");
+    expect(entry.parsed_commands[0].args).toEqual(["/etc/passwd"]);
+    expect(entry.parsed_commands[0].operator).toBe("|");
+    expect(entry.parsed_commands[1].verb).toBe("grep");
+    expect(entry.parsed_commands[1].operator).toBeNull();
+  });
+
+  it("omits parsed_commands when not provided", async () => {
+    const logFile = testLogFile("no-parsed");
+    initLogger(logFile);
+    writeLogEntry("ls", "/tmp", SAMPLE_ASSESSMENT, 1);
+    await settle();
+
+    const content = await readFile(logFile, "utf-8");
+    const entry = JSON.parse(content.trim());
+    expect(entry.parsed_commands).toBeUndefined();
+  });
+
+  it("findings include analyzer attribution", async () => {
+    const logFile = testLogFile("analyzer-attr");
+    const assessment: RiskAssessment = {
+      risk_level: "high",
+      action: "ask",
+      summary: "High risk",
+      details: [
+        { category: "destructive", severity: "high", description: "rm -rf", analyzer: "destructive" },
+        { category: "network", severity: "medium", description: "curl to external", analyzer: "network" },
+      ],
+      recommendation: "Review carefully.",
+    };
+    initLogger(logFile);
+    writeLogEntry("rm -rf / && curl evil.com", "/tmp", assessment, 10);
+    await settle();
+
+    const content = await readFile(logFile, "utf-8");
+    const entry = JSON.parse(content.trim());
+    expect(entry.assessment.details[0].analyzer).toBe("destructive");
+    expect(entry.assessment.details[1].analyzer).toBe("network");
   });
 });

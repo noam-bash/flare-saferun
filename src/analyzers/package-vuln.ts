@@ -179,20 +179,22 @@ function cvssToSeverity(score: number | null): Finding["severity"] {
   return "low";
 }
 
-export function createPackageVulnAnalyzer(osvTimeout = 1500): Analyzer {
+export function createPackageVulnAnalyzer(osvTimeout = 1500, allowlist: string[] = []): Analyzer {
+  const allowSet = new Set(allowlist.map(s => s.toLowerCase()));
+
   return {
     name: "package-vuln",
 
     async analyze(parsed: ParsedCommand[]): Promise<AnalyzerResult> {
       const findings: Finding[] = [];
-      const packages: PackageInfo[] = [];
+      const allPackages: PackageInfo[] = [];
       let partial = false;
 
       // Extract packages from all command segments
       for (const cmd of parsed) {
         for (const [, config] of Object.entries(ECOSYSTEM_MAP)) {
           if (config.verbs.includes(cmd.verb)) {
-            packages.push(...config.parseArgs(cmd.args));
+            allPackages.push(...config.parseArgs(cmd.args));
           }
         }
 
@@ -201,11 +203,21 @@ export function createPackageVulnAnalyzer(osvTimeout = 1500): Analyzer {
           const innerVerb = cmd.args[0];
           for (const [, config] of Object.entries(ECOSYSTEM_MAP)) {
             if (config.verbs.includes(innerVerb)) {
-              packages.push(...config.parseArgs(cmd.args.slice(1)));
+              allPackages.push(...config.parseArgs(cmd.args.slice(1)));
             }
           }
         }
       }
+
+      if (allPackages.length === 0) return { findings };
+
+      // Filter out allowlisted packages
+      const packages = allPackages.filter(pkg => {
+        const key = pkg.version
+          ? `${pkg.name}@${pkg.version}`.toLowerCase()
+          : pkg.name.toLowerCase();
+        return !allowSet.has(key) && !allowSet.has(pkg.name.toLowerCase());
+      });
 
       if (packages.length === 0) return { findings };
 

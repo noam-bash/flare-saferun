@@ -22,6 +22,7 @@ export interface Finding {
   category: string;
   severity: RiskLevel;
   description: string;
+  analyzer?: string;
 }
 
 export interface AnalyzerResult {

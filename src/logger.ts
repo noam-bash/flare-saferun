@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from "fs/promises";
 import { dirname } from "path";
-import type { RiskAssessment } from "./types.js";
+import type { ParsedCommand, RiskAssessment } from "./types.js";
 
 interface LogEntry {
   timestamp: string;
@@ -8,6 +8,7 @@ interface LogEntry {
   cwd: string;
   duration_ms: number;
   assessment: RiskAssessment;
+  parsed_commands?: Array<{ verb: string; args: string[]; operator: string | null }>;
 }
 
 let logFilePath: string | false = false;
@@ -34,6 +35,7 @@ export function writeLogEntry(
   cwd: string,
   assessment: RiskAssessment,
   durationMs: number,
+  parsed?: ParsedCommand[],
 ): void {
   if (logFilePath === false) return;
 
@@ -44,6 +46,14 @@ export function writeLogEntry(
     duration_ms: durationMs,
     assessment,
   };
+
+  if (parsed && parsed.length > 0) {
+    entry.parsed_commands = parsed.map(p => ({
+      verb: p.verb,
+      args: p.args,
+      operator: p.operator,
+    }));
+  }
 
   const line = JSON.stringify(entry) + "\n";
   const path = logFilePath;
