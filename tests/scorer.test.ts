@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { scoreRisk } from "../src/scorer.js";
-import type { AnalyzerResult } from "../src/types.js";
+import type { AnalyzerResult, ActionPolicy } from "../src/types.js";
 
 describe("scoreRisk", () => {
   it("returns none for empty findings", () => {
@@ -87,5 +87,75 @@ describe("scoreRisk", () => {
       },
     ]);
     expect(result.recommendation.length).toBeGreaterThan(0);
+  });
+});
+
+describe("scoreRisk action field", () => {
+  it("returns action 'run' for none risk level", () => {
+    const result = scoreRisk([{ findings: [] }]);
+    expect(result.action).toBe("run");
+  });
+
+  it("returns action 'warn' for medium risk level", () => {
+    const result = scoreRisk([
+      {
+        findings: [
+          { category: "network", severity: "medium", description: "HTTP" },
+        ],
+      },
+    ]);
+    expect(result.action).toBe("warn");
+  });
+
+  it("returns action 'ask' for high risk level", () => {
+    const result = scoreRisk([
+      {
+        findings: [
+          { category: "network", severity: "high", description: "netcat" },
+        ],
+      },
+    ]);
+    expect(result.action).toBe("ask");
+  });
+
+  it("returns action 'ask' for critical risk level", () => {
+    const result = scoreRisk([
+      {
+        findings: [
+          { category: "destructive", severity: "critical", description: "rm -rf /" },
+        ],
+      },
+    ]);
+    expect(result.action).toBe("ask");
+  });
+
+  it("respects custom action policy", () => {
+    const customPolicy: ActionPolicy = {
+      none: "run",
+      low: "run",
+      medium: "run",
+      high: "warn",
+      critical: "ask",
+    };
+    const result = scoreRisk(
+      [{ findings: [{ category: "network", severity: "medium", description: "HTTP" }] }],
+      customPolicy,
+    );
+    expect(result.action).toBe("run");
+  });
+
+  it("respects custom policy for high level", () => {
+    const customPolicy: ActionPolicy = {
+      none: "run",
+      low: "run",
+      medium: "run",
+      high: "warn",
+      critical: "ask",
+    };
+    const result = scoreRisk(
+      [{ findings: [{ category: "network", severity: "high", description: "netcat" }] }],
+      customPolicy,
+    );
+    expect(result.action).toBe("warn");
   });
 });

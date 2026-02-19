@@ -69,15 +69,21 @@ const ECOSYSTEM_MAP: Record<string, { verbs: string[]; ecosystem: string; parseA
   },
 };
 
-// In-memory cache for OSV results
+// In-memory cache for OSV results, bounded to prevent memory leaks
+const OSV_CACHE_MAX = 500;
 const osvCache = new Map<string, OsvVulnerability[]>();
 
-async function queryOsv(pkg: PackageInfo, timeout: number): Promise<OsvVulnerability[]> {
-  if (!pkg.version) return []; // Can't query without a version
+interface OsvResult {
+  vulns: OsvVulnerability[];
+  error?: string;
+}
+
+async function queryOsv(pkg: PackageInfo, timeout: number): Promise<OsvResult> {
+  if (!pkg.version) return { vulns: [] }; // Can't query without a version
 
   const cacheKey = `${pkg.ecosystem}:${pkg.name}@${pkg.version}`;
   const cached = osvCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) return { vulns: cached };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -93,14 +99,21 @@ async function queryOsv(pkg: PackageInfo, timeout: number): Promise<OsvVulnerabi
       signal: controller.signal,
     });
 
-    if (!response.ok) return [];
+    if (!response.ok) return { vulns: [], error: `OSV API returned HTTP ${response.status}` };
 
     const data = (await response.json()) as { vulns?: OsvVulnerability[] };
     const vulns = data.vulns ?? [];
+    // Evict oldest entry if cache is full
+    if (osvCache.size >= OSV_CACHE_MAX) {
+      const oldest = osvCache.keys().next().value;
+      if (oldest !== undefined) osvCache.delete(oldest);
+    }
     osvCache.set(cacheKey, vulns);
-    return vulns;
-  } catch {
-    return []; // Timeout or network error — degrade gracefully
+    return { vulns };
+  } catch (err) {
+    const isTimeout = err instanceof DOMException && err.name === "AbortError";
+    const reason = isTimeout ? "request timed out" : "network error";
+    return { vulns: [], error: `OSV lookup failed: ${reason}` };
   } finally {
     clearTimeout(timer);
   }
@@ -110,8 +123,52 @@ function getCvssScore(vuln: OsvVulnerability): number | null {
   if (!vuln.severity) return null;
   const cvss = vuln.severity.find(s => s.type === "CVSS_V3" || s.type === "CVSS_V2");
   if (!cvss) return null;
-  const score = parseFloat(cvss.score);
-  return isNaN(score) ? null : score;
+
+  // Try numeric score first (e.g. "9.8")
+  const numeric = parseFloat(cvss.score);
+  if (!isNaN(numeric) && numeric >= 0 && numeric <= 10) return numeric;
+
+  // OSV.dev often returns CVSS vector strings like "CVSS:3.1/AV:N/AC:L/..."
+  // Approximate a base score from impact metrics
+  if (cvss.score.startsWith("CVSS:")) {
+    return approximateScoreFromVector(cvss.score);
+  }
+
+  return null;
+}
+
+/**
+ * Approximate a CVSS v3 base score from the vector string.
+ * This is a rough heuristic — not a full CVSS calculator — but good enough
+ * to distinguish critical/high/medium/low for alerting purposes.
+ */
+function approximateScoreFromVector(vector: string): number {
+  const metrics: Record<string, string> = {};
+  for (const part of vector.split("/")) {
+    const [key, val] = part.split(":");
+    if (key && val) metrics[key] = val;
+  }
+
+  // Confidentiality, Integrity, Availability impact
+  const impactValues: Record<string, number> = { N: 0, L: 1, H: 2 };
+  const ci = impactValues[metrics["VC"] ?? metrics["C"] ?? "N"] ?? 0;
+  const ii = impactValues[metrics["VI"] ?? metrics["I"] ?? "N"] ?? 0;
+  const ai = impactValues[metrics["VA"] ?? metrics["A"] ?? "N"] ?? 0;
+  const maxImpact = Math.max(ci, ii, ai);
+
+  // Attack complexity and privileges required
+  const acLow = (metrics["AC"] ?? "H") === "L";
+  const prNone = (metrics["PR"] ?? "H") === "N";
+
+  // Heuristic scoring based on impact + exploitability
+  if (maxImpact === 0) return 0;
+  let score = maxImpact === 2 ? 7.0 : 4.0; // High impact base 7, Low impact base 4
+  if (acLow) score += 1.0;
+  if (prNone) score += 1.0;
+  // Scope changed adds severity
+  if (metrics["S"] === "C") score += 0.5;
+
+  return Math.min(score, 10);
 }
 
 function cvssToSeverity(score: number | null): Finding["severity"] {
@@ -129,6 +186,7 @@ export function createPackageVulnAnalyzer(osvTimeout = 1500): Analyzer {
     async analyze(parsed: ParsedCommand[]): Promise<AnalyzerResult> {
       const findings: Finding[] = [];
       const packages: PackageInfo[] = [];
+      let partial = false;
 
       // Extract packages from all command segments
       for (const cmd of parsed) {
@@ -154,12 +212,22 @@ export function createPackageVulnAnalyzer(osvTimeout = 1500): Analyzer {
       // Query OSV.dev for each package in parallel
       const results = await Promise.all(
         packages.map(async (pkg) => {
-          const vulns = await queryOsv(pkg, osvTimeout);
-          return { pkg, vulns };
+          const result = await queryOsv(pkg, osvTimeout);
+          return { pkg, ...result };
         })
       );
 
-      for (const { pkg, vulns } of results) {
+      for (const { pkg, vulns, error } of results) {
+        if (error) {
+          partial = true;
+          findings.push({
+            category: "package-vulnerability",
+            severity: "medium",
+            description: `\`${pkg.name}@${pkg.version}\` — ${error}; vulnerability status unknown`,
+          });
+          continue;
+        }
+
         if (vulns.length === 0) continue;
 
         // Find highest CVSS score
@@ -189,7 +257,7 @@ export function createPackageVulnAnalyzer(osvTimeout = 1500): Analyzer {
         });
       }
 
-      return { findings };
+      return { findings, partial };
     },
   };
 }

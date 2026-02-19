@@ -26,8 +26,9 @@ export const destructiveAnalyzer: Analyzer = {
     for (const cmd of parsed) {
       // rm with force/recursive flags
       if (cmd.verb === "rm") {
-        const hasForce = cmd.args.some(a => a.includes("f"));
-        const hasRecursive = cmd.args.some(a => a.includes("r") || a.includes("R"));
+        const flags = cmd.args.filter(a => a.startsWith("-"));
+        const hasForce = flags.some(a => a === "-f" || a === "-rf" || a === "-fr" || a.startsWith("--force") || (a.startsWith("-") && !a.startsWith("--") && a.includes("f")));
+        const hasRecursive = flags.some(a => a === "-r" || a === "-R" || a === "-rf" || a === "-fr" || a === "-rR" || a === "-Rf" || a.startsWith("--recursive") || (a.startsWith("-") && !a.startsWith("--") && (a.includes("r") || a.includes("R"))));
         const targets = cmd.args.filter(a => !a.startsWith("-"));
 
         if (hasForce && hasRecursive) {
@@ -92,6 +93,18 @@ export const destructiveAnalyzer: Analyzer = {
           category: "destructive",
           severity: "high",
           description: `\`shred\` — securely overwrites file(s), making data unrecoverable`,
+        });
+      }
+
+      if (cmd.verb === "dd") {
+        const ofTarget = cmd.args.find(a => a.startsWith("of="));
+        const isDevice = ofTarget && /of=\/dev\//.test(ofTarget);
+        findings.push({
+          category: "destructive",
+          severity: isDevice ? "critical" : "high",
+          description: isDevice
+            ? `\`dd\` writing directly to device (${ofTarget}) — can destroy entire disk`
+            : `\`dd\` — low-level data copy, can overwrite files or devices`,
         });
       }
 

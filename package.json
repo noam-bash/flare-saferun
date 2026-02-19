@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
+    "dashboard": "tsx src/dashboard.ts",
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },

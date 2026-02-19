@@ -1,12 +1,21 @@
 import type { ParsedCommand, Redirect } from "./types.js";
 import { homedir } from "os";
 
+const MAX_COMMAND_LENGTH = 10_000;
+
 /**
  * Parse a shell command string into structured segments.
- * Handles pipes, chains (&&, ||, ;), quotes, redirects, and tilde expansion.
+ * Handles pipes, chains (&&, ||, ;), quotes, redirects, subshells, and tilde expansion.
  */
 export function parseCommand(command: string): ParsedCommand[] {
-  const segments = splitByOperator(command);
+  if (command.length > MAX_COMMAND_LENGTH) {
+    throw new Error(`Command too long (${command.length} chars, max ${MAX_COMMAND_LENGTH})`);
+  }
+
+  // Extract subshell/backtick contents and append them as extra segments
+  // so inner commands like $(curl ...) or `rm -rf /` get analyzed
+  const expanded = expandSubshells(command);
+  const segments = splitByOperator(expanded);
   const results: ParsedCommand[] = [];
 
   for (let i = 0; i < segments.length; i++) {
@@ -181,6 +190,32 @@ function extractRedirects(segment: string): Redirect[] {
  */
 function removeRedirects(segment: string): string {
   return segment.replace(/(>>|>)\s*\S+/g, "").trim();
+}
+
+/**
+ * Extract contents of $(...) and `...` subshells and append them
+ * as semicolon-separated segments so they get analyzed.
+ */
+function expandSubshells(command: string): string {
+  const subshells: string[] = [];
+
+  // Match $(...) — handles one level of nesting
+  const dollarParen = /\$\(([^)]+)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = dollarParen.exec(command)) !== null) {
+    subshells.push(match[1]);
+  }
+
+  // Match `...` backticks
+  const backtick = /`([^`]+)`/g;
+  while ((match = backtick.exec(command)) !== null) {
+    subshells.push(match[1]);
+  }
+
+  if (subshells.length === 0) return command;
+
+  // Append subshell contents as additional segments separated by ;
+  return command + " ; " + subshells.join(" ; ");
 }
 
 /**

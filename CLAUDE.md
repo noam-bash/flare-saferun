@@ -31,6 +31,14 @@ This is Flare — a local MCP server that provides real-time risk assessment for
 - Deterministic analysis only — no LLM calls in the analysis path
 - OSV.dev queries use AbortController with 1500ms timeout and in-memory caching
 
+## Flare Hook
+
+Before executing any shell command via the Bash tool, call `flare.assess_command` with the command string and current working directory. Read the `action` field from the response and follow it:
+
+- `"run"`: Execute the command. Do not display the risk assessment.
+- `"warn"`: Execute the command, then briefly show the risk summary to the user.
+- `"ask"`: Show the full risk assessment and wait for explicit user confirmation before executing.
+
 ## Adding a new analyzer
 
 1. Create `src/analyzers/your-analyzer.ts` implementing the `Analyzer` interface

@@ -1,5 +1,9 @@
 export type RiskLevel = "none" | "low" | "medium" | "high" | "critical";
 
+export type Action = "run" | "warn" | "ask";
+
+export type ActionPolicy = Record<RiskLevel, Action>;
+
 export interface Redirect {
   type: ">" | ">>";
   target: string;
@@ -22,6 +26,7 @@ export interface Finding {
 
 export interface AnalyzerResult {
   findings: Finding[];
+  partial?: boolean;
 }
 
 export interface Analyzer {
@@ -31,13 +36,19 @@ export interface Analyzer {
 
 export interface RiskAssessment {
   risk_level: RiskLevel;
+  action: Action;
   summary: string;
   details: Finding[];
   recommendation: string;
+  partial?: boolean;
 }
 
 export interface Config {
+  actionPolicy: ActionPolicy;
   sensitivePatterns: string[];
   packageAllowlist: string[];
   osvTimeout: number;
+  safeHosts: string[];
+  commandAllowlist: string[];
+  logFile: string | false;
 }

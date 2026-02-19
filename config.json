@@ -1,5 +1,14 @@
 {
+  "actionPolicy": {
+    "none": "run",
+    "low": "run",
+    "medium": "warn",
+    "high": "ask",
+    "critical": "ask"
+  },
   "sensitivePatterns": [],
   "packageAllowlist": [],
-  "osvTimeout": 1500
+  "osvTimeout": 1500,
+  "safeHosts": [],
+  "commandAllowlist": []
 }

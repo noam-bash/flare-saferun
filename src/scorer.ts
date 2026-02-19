@@ -1,6 +1,14 @@
-import type { AnalyzerResult, Finding, RiskAssessment, RiskLevel } from "./types.js";
+import type { ActionPolicy, AnalyzerResult, Finding, RiskAssessment, RiskLevel } from "./types.js";
 
 const SEVERITY_ORDER: RiskLevel[] = ["none", "low", "medium", "high", "critical"];
+
+const DEFAULT_ACTION_POLICY: ActionPolicy = {
+  none: "run",
+  low: "run",
+  medium: "warn",
+  high: "ask",
+  critical: "ask",
+};
 
 function severityIndex(level: RiskLevel): number {
   return SEVERITY_ORDER.indexOf(level);
@@ -9,15 +17,18 @@ function severityIndex(level: RiskLevel): number {
 /**
  * Aggregate findings from all analyzers into a single RiskAssessment.
  */
-export function scoreRisk(results: AnalyzerResult[]): RiskAssessment {
+export function scoreRisk(results: AnalyzerResult[], actionPolicy: ActionPolicy = DEFAULT_ACTION_POLICY): RiskAssessment {
   const allFindings = results.flatMap(r => r.findings);
+  const partial = results.some(r => r.partial);
 
   if (allFindings.length === 0) {
     return {
       risk_level: "none",
+      action: actionPolicy.none,
       summary: "No security concerns detected.",
       details: [],
       recommendation: "Command appears safe to execute.",
+      ...(partial && { partial }),
     };
   }
 
@@ -27,6 +38,7 @@ export function scoreRisk(results: AnalyzerResult[]): RiskAssessment {
 
   return {
     risk_level: riskLevel,
+    action: actionPolicy[riskLevel],
     summary,
     details: allFindings.map(f => ({
       category: f.category,
@@ -34,6 +46,7 @@ export function scoreRisk(results: AnalyzerResult[]): RiskAssessment {
       description: f.description,
     })),
     recommendation,
+    ...(partial && { partial }),
   };
 }
 

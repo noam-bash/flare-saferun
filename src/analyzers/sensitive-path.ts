@@ -93,68 +93,65 @@ function matchPath(path: string, patterns: PathPattern[]): PathPattern | null {
   return null;
 }
 
-export const sensitivePathAnalyzer: Analyzer = {
-  name: "sensitive-path",
+export function createSensitivePathAnalyzer(extraPatterns: string[] = []): Analyzer {
+  return {
+    name: "sensitive-path",
 
-  async analyze(parsed: ParsedCommand[], cwd: string): Promise<AnalyzerResult> {
-    const findings: Finding[] = [];
-    const patterns = getPatterns();
+    async analyze(parsed: ParsedCommand[], cwd: string): Promise<AnalyzerResult> {
+      const findings: Finding[] = [];
+      const patterns = getPatterns(extraPatterns);
 
-    for (const cmd of parsed) {
-      const allPaths: { path: string; isWrite: boolean }[] = [];
+      for (const cmd of parsed) {
+        const allPaths: { path: string; isWrite: boolean }[] = [];
 
-      // Collect paths from args
-      for (const arg of cmd.args) {
-        if (arg.startsWith("-")) continue;
-        const isWrite = WRITE_VERBS.has(cmd.verb);
-        const isRead = READ_VERBS.has(cmd.verb);
-        if (isWrite || isRead) {
-          allPaths.push({ path: arg, isWrite });
+        // Collect paths from args
+        for (const arg of cmd.args) {
+          if (arg.startsWith("-")) continue;
+          const isWrite = WRITE_VERBS.has(cmd.verb);
+          const isRead = READ_VERBS.has(cmd.verb);
+          if (isWrite || isRead) {
+            allPaths.push({ path: arg, isWrite });
+          }
         }
-      }
 
-      // Collect paths from redirects (always writes)
-      for (const redirect of cmd.redirects) {
-        allPaths.push({ path: redirect.target, isWrite: true });
-      }
-
-      // Also check echo/printf with redirect (write to file)
-      if ((cmd.verb === "echo" || cmd.verb === "printf") && cmd.redirects.length > 0) {
+        // Collect paths from redirects (always writes)
         for (const redirect of cmd.redirects) {
           allPaths.push({ path: redirect.target, isWrite: true });
         }
-      }
 
-      // Match each path
-      for (const { path, isWrite } of allPaths) {
-        const match = matchPath(path, patterns);
-        if (!match) continue;
+        // Match each path
+        for (const { path, isWrite } of allPaths) {
+          const match = matchPath(path, patterns);
+          if (!match) continue;
 
-        const action = isWrite ? "Writing to" : "Reading from";
-        const isSystemAuth = ["System password hashes", "Sudo configuration"].includes(match.label);
-        const isCredential = ["SSH keys and configuration", "AWS credentials", "GCloud credentials", "RSA private key", "Private key file", "PEM certificate/key"].includes(match.label);
+          const action = isWrite ? "Writing to" : "Reading from";
+          const isSystemAuth = ["System password hashes", "Sudo configuration"].includes(match.label);
+          const isCredential = ["SSH keys and configuration", "AWS credentials", "GCloud credentials", "RSA private key", "Private key file", "PEM certificate/key"].includes(match.label);
 
-        let severity: Finding["severity"];
-        if (isWrite && (isCredential || isSystemAuth)) {
-          severity = "critical";
-        } else if (isWrite && match.label === "Claude agent configuration") {
-          severity = "high";
-        } else if (!isWrite && isSystemAuth) {
-          severity = "high";
-        } else if (isWrite) {
-          severity = "medium";
-        } else {
-          severity = "medium";
+          let severity: Finding["severity"];
+          if (isWrite && (isCredential || isSystemAuth)) {
+            severity = "critical";
+          } else if (isWrite && match.label === "Claude agent configuration") {
+            severity = "high";
+          } else if (!isWrite && isSystemAuth) {
+            severity = "high";
+          } else if (isWrite) {
+            severity = "medium";
+          } else {
+            severity = "medium";
+          }
+
+          findings.push({
+            category: "sensitive-path",
+            severity,
+            description: `${action} \`${path}\` — ${match.label}`,
+          });
         }
-
-        findings.push({
-          category: "sensitive-path",
-          severity,
-          description: `${action} \`${path}\` — ${match.label}`,
-        });
       }
-    }
 
-    return { findings };
-  },
-};
+      return { findings };
+    },
+  };
+}
+
+export const sensitivePathAnalyzer = createSensitivePathAnalyzer();
