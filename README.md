@@ -111,6 +111,12 @@ npm run dashboard
 
 Opens at `http://localhost:6040`. Supports filtering by risk level, action, search text, and time range. Polls for new entries automatically.
 
+![Dashboard overview](docs/dashboard-overview.png)
+
+Filter by risk level to focus on what matters:
+
+![Dashboard filtered by high risk](docs/dashboard-filtered.png)
+
 ## Configuration
 
 Flare works with zero configuration. To customize, edit `config.json`:
